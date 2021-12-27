@@ -1,0 +1,263 @@
+//PIN A0    = Soil  Moisture Sensor
+//PIN 4(D2) = DHT22
+//PIN 5(D1) = Water Flow Sensor
+//PIN 14(D5) Relay1    = Solenoid Valve(โซลินอยด์วาล์ว)ตัว D1
+//PIN 15(D8) Relay2    = Solenoid Valve(โซลินอยด์วาล์ว)ตัว D2
+//PIN 12(D6) Relay3    = พัดลม 
+//--------------------------------------------------------------
+#include <ESP8266WiFi.h>      //เรียกใช้ไลบรารี่
+#include <DNSServer.h>        //เรียกใช้ไลบรารี่
+#include <ESP8266WebServer.h> //เรียกใช้ไลบรารี่
+#include <WiFiManager.h>      //เรียกใช้ไลบรารี่
+#include <FirebaseArduino.h>  //เรียกใช้ไลบรารี่
+#include <DHT.h>              //เรียกใช้ไลบรารี
+//-------------------------------------------------------------
+int Relaytime2;      //กำหนดตัวแปรเก็บค่า Relaytime2 เป็น int
+int Relaytime3;      //กำหนดตัวแปรเก็บค่า Relaytime3 เป็น int
+int Relaytime5;      //กำหนดตัวแปรเก็บค่า Relaytime5 เป็น int
+int Relaytime6;      //กำหนดตัวแปรเก็บค่า Relaytime6 เป็น int
+// Config Firebase--------------------------------------------
+#define FIREBASE_HOST "iot-1…...firebaseio.com"     // กำหนดค่า HOST ของ FIREBASE
+#define FIREBASE_AUTH "9g6bOnRmWKwWRElk…."   // กำหนดค่า AUTH ของ FIREBASE
+// Config DHT-------------------------------------------------
+#define DHTPIN 4    //กำหนดขาที่ต่อกับ DHT22 4(D2)  
+#define DHTTYPE DHT22 //กำหนดรุ่นที่เชื่อมต่อ
+DHT dht(DHTPIN, DHTTYPE); // สร้างออปเจก DHT22 สำหรับติดต่อกับเซนเซอร์
+//------------------------------------------------------------
+int sensorPin = A0;       //กำหนดขาที่ต่อกับ Soil  Moisture Sensor  A0 
+//------------------------------------------------------------
+int val0;               //กำหนดตัวแปรเก็บค่า val0 เป็น int
+#define Relay1 14     //กำหนดขาที่ต่อกับ Relay1 14(D5) 
+int val1;               //กำหนดตัวแปรเก็บค่า val1 เป็น int
+#define Relay2 15     //กำหนดขาที่ต่อกับ Relay2 15(D8)
+int val2;               //กำหนดตัวแปรเก็บค่า val2 เป็น int
+#define Relay3 12     //กำหนดขาที่ต่อกับ Relay3 12(D6)
+int val3;               //กำหนดตัวแปรเก็บค่า val3 เป็น int
+//----------------------------------------------------------
+int H;                  //กำหนดตัวแปรเก็บค่า H เป็น int
+int T;                  //กำหนดตัวแปรเก็บค่า T เป็น int
+int SM;                 //กำหนดตัวแปรเก็บค่า SM เป็น int
+//----------------------------------------------------------
+#define TH_STATE_PLAY 0 //กำหนด TH_STATE_PLAY เป็น 0
+#define TH_STATE_STOP 1 //กำหนด TH_STATE_STOP เป็น 1
+#define SM_STATE_PLAY 3 //กำหนด SM_STATE_PLAY เป็น 3
+#define SM_STATE_STOP 4 //กำหนด SM_STATE_STOP เป็น 4
+unsigned long timer1 = millis();
+unsigned long timer2 = millis();
+int state1 = TH_STATE_PLAY; กำหนดตัวแปรเก็บค่า state1 = TH_STATE_PLAY เป็น int
+int state2 = SM_STATE_PLAY; กำหนดตัวแปรเก็บค่า state2 = SM_STATE_PLAY เป็น int
+//----------------------------------------------------------
+volatile int NbTopsFan;       //กำหนดตัวแปรเก็บค่าการวัดขอบที่เพิ่มขึ้นของสัญญาณ 
+int Calc;                     //กำหนดตัวแปรเก็บค่า เป็น int
+int Total;                    //กำหนดตัวแปรเก็บค่า เป็น int
+int hallsensor = 5;           //กำหนดขาที่ต่อกับ hallsensor (D1)
+//#define hallsensor 5        //กำหนดขาที่ต่อกับ hallsensor (D1) 
+ICACHE_RAM_ATTR void rpm ()
+{
+  NbTopsFan++;
+}
+void setup() {
+  Serial.begin(9600);
+  pinMode(Relay1,OUTPUT);         //ตั้ง relay1 เป็น  เอาท์พุท
+  pinMode(Relay2,OUTPUT);         //ตั้ง relay2 เป็น  เอาท์พุท
+  pinMode(Relay3,OUTPUT);         //ตั้ง relay3 เป็น  เอาท์พุท
+  digitalWrite(Relay1,LOW);       //กำหนดกำหนดค่าเริ่มต้นของ Relay1 เป็น ปิด
+  digitalWrite(Relay2,LOW);       //กำหนดกำหนดค่าเริ่มต้นของ Relay2 เป็น ปิด
+  digitalWrite(Relay3,LOW);       //กำหนดกำหนดค่าเริ่มต้นของ Relay3 เป็น ปิด
+  pinMode(hallsensor, INPUT_PULLUP);  //ตั้ง hallsensor เป็น  เอาท์พุท(INPUT_PULLUP คือจ่ายไฟ Vcc สัญญาณ 1 ให้กับ input เพื่อป้องกันสัญญาณรบกวน)
+  attachInterrupt(digitalPinToInterrupt(hallsensor), rpm, RISING);
+  WiFiManager wifiManager;
+  wifiManager.setTimeout(180);    
+  if(!wifiManager.autoConnect("ESP8266-LOMA-DHT"))    //กำหนดชื่อ wifiManager เป็น ESP8266-LOMA-DHT 
+    {
+      Serial.println("Failed to connect and hit timeout");
+      delay(3000);
+      ESP.reset();
+      delay(5000);
+    }
+    WiFi.printDiag(Serial);
+    Serial.println();
+    Serial.println("connected...OK");
+}
+void firebasereconnect()
+{
+  Serial.println("Trying to reconnect");
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  dht.begin();
+  Firebase.setInt("S0",0);                     //เป็นตัวแปรที่ใช้ในการรับค่า จาก Firebase และ MIT App Inventor 
+  Firebase.setInt("S1",0);                     //เป็นตัวแปรที่ใช้ในการรับค่า จาก Firebase และ MIT App Inventor 
+  Firebase.setInt("S2",0);                     //เป็นตัวแปรที่ใช้ในการรับค่า จาก Firebase และ MIT App Inventor 
+  Firebase.setInt("S3",0);                     //เป็นตัวแปรที่ใช้ในการรับค่า จาก Firebase และ MIT App Inventor
+}
+void loop() 
+{
+    // Read temp & Humidity for DHT22
+    float h = dht.readHumidity();           // คำสั่งดึงค่าความชื้น
+    float t = dht.readTemperature();        // คำสั่งดึงค่าอุณหภูมิ
+    int sensorValue;                        //กำหนดตัวแปรเก็บค่า เป็น int
+    sensorValue = analogRead(sensorPin);    //อ่านค่าจากเซ็นเซอร์
+    sensorValue = map(sensorValue, 0, 1023, 0, 100);    //แปลค่าที่อยู่ระหว่าง 0 - 1023 ให้มีค่าระหว่าง 0 - 100 และเก็บค่าเอาไว้ที่ sensorValu
+    NbTopsFan = 0;          //ตั้งค่า NbTopsFan เป็น 0 พร้อมสำหรับการคำนวณ
+    sei();                    //เปิดใช้งานการขัดจังหวะ
+    delay (1000);           //รอ 1 วินาที
+    cli();                    //ปิดใช้งานการขัดจังหวะ
+    Calc = (NbTopsFan * 60 / 7.5);  //(ความถี่พัลส์ x 60) / 7.5Q, = flow rate in L/hour
+    Total = Total + Calc;       //ผลรวม = ผลรวม + ค่าที่ได้จากการทำงาน  
+    Serial.print("Humidity ");
+    Serial.print(h);
+    Serial.print(" %\t");
+    Serial.print("Temperature ");
+    Serial.print(t);
+    Serial.print(" *C ");
+    Serial.println();
+    Serial.print("Soil moisture ");
+    Serial.print(sensorValue);
+    Serial.println(" %");
+    Serial.print ("Water Flow");
+    Serial.print (Calc, DEC); 
+    Serial.print (" L/hour\r\n"); e
+    Serial.print ("Total Water Flow");
+    Serial.print (Total); //Prints the number calculated above
+    Serial.print (" L\r\n"); //Prints "L/hour" and returns a  new line 
+    
+    Firebase.setFloat ("Temperature",t);                //ส่งค่าไปเก็บที่Firebas
+    Firebase.setFloat ("Humidity",h);                   //ส่งค่าไปเก็บที่Firebas
+    Firebase.setFloat ("Soil moisture",sensorValue);    //ส่งค่าไปเก็บที่Firebas
+    Firebase.setFloat ("Water Flow",Calc);              //ส่งค่าไปเก็บที่Firebas
+    Firebase.setFloat ("Total Water Flow",Total);       //ส่งค่าไปเก็บที่Firebas
+    
+    if (Firebase.failed())      // ทำการตรวจสอบ การส่งและอ่านค่า Firebase ว่า Error ไหม
+        {
+        Serial.print("setting number failed:");
+        Serial.println(Firebase.error());
+        firebasereconnect();
+        return;
+        }
+        val0         =Firebase.getString("S0").toInt();   //การอ่านค่าสถานะ varialble จาก firebase    
+        val1         =Firebase.getString("S1").toInt();    //การอ่านค่าสถานะ varialble จาก firebase   
+        val2         =Firebase.getString("S2").toInt();    //การอ่านค่าสถานะ varialble จาก firebase   
+        val3         =Firebase.getString("S3").toInt();    //การอ่านค่าสถานะ varialble จาก firebase   
+        HUM          =Firebase.getString("HUM").toInt();   //การอ่านค่าสถานะ varialble จาก firebase   
+        TEM          =Firebase.getString("TEM").toInt();     //การอ่านค่าสถานะ varialble จาก firebase   
+        SM           =Firebase.getString("Sm").toInt();         //การอ่านค่าสถานะ varialble จาก firebase   
+        Relaytime2   =Firebase.getString("Relaytime2").toInt(); //การอ่านค่าสถานะ varialble จาก   firebase
+        Relaytime3   =Firebase.getString("Relaytime3").toInt();   //การอ่านค่าสถานะ varialble     จาก firebase
+        Relaytime5   =Firebase.getString("Relaytime5").toInt();         //การอ่านค่าสถานะ varialble จาก firebase    
+        Relaytime6   =Firebase.getString("Relaytime6").toInt();      //การอ่านค่าสถานะ varialble จาก firebase
+    if(val0==1)                                                             
+     {
+            Serial.println("MANUAL");
+        
+            if(val1==1)                                                           // หากสถานะคือ 1 ให้เปิดรีเลย์ 1
+                 {
+                    digitalWrite(Relay1,HIGH);
+                    Serial.println("Relay 1 ON");
+                 }
+            else if(val1==0)                                                     // หากสถานะเป็น 0 ให้ปิดรีเลย์ 1
+                 {                                      
+                    digitalWrite(Relay1,LOW);
+                    Serial.println("Relay 1 OFF");
+                 }
+            if(val2==1)                                                           // หากสถานะคือ 1 ให้เปิดรีเลย์ 2
+                 {
+                    digitalWrite(Relay2,HIGH);
+                    Serial.println("Relay 2 ON");
+                 }
+            else if(val2==0)                                                      // หากสถานะเป็น 0 ให้ปิดรีเลย์ 2
+                 {                                      
+                    digitalWrite(Relay2,LOW);
+                    Serial.println("Relay 2 OFF");
+                 }
+            if(val3==1)                                                            // หากสถานะคือ 1 ให้เปิดรีเลย์ 3
+                 {
+                    digitalWrite(Relay3,HIGH);
+                    Serial.println("Relay 3 ON");
+                 }
+            else if(val3==0)                                                       // หากสถานะเป็น 0 ให้ปิดรีเลย์ 3
+                 {                                      
+                   digitalWrite(Relay3,LOW);
+                   Serial.println("Relay 3 OFF");
+                 }   
+    }
+else if(val0==0)                                                      
+    {   
+      Serial.println("AUTO");
+
+           switch (state1)
+        {
+                  case TH_STATE_PLAY://delay 3000
+        Serial.print("H\t");
+        Serial.println((millis() - timer1)/1000);
+        if( t > TEM && h > HUM )            //อุณหภูมิ เกิน ความชื้นอากาศ เกิน Relay 2 และ Relay3 ทำงาน                                                     
+          {
+            digitalWrite(Relay2,HIGH);    
+            digitalWrite(Relay3,HIGH);
+          }
+        else if( t > TEM && h <= HUM )      //อุณหภูมิ เกิน ความชื้นอากาศ ไม่เกิน Relay 2 ทำงาน  และ Relay 3 ไม่ทำงาน                                                      
+          {
+           digitalWrite(Relay2,HIGH);                                      
+           digitalWrite(Relay3,LOW);
+          }
+        else if( t <= TEM && h > HUM )     //อุณหภูมิ ไม่เกิน ความชื้นอากาศ เกิน Relay 2 ไม่ทำงาน  และ Relay 3 ทำงาน                                                       
+          {
+           digitalWrite(Relay2,LOW);                                      
+           digitalWrite(Relay3,HIGH);
+          }
+        else if( t <= TEM && h <= HUM )   //อุณหภูมิ ไม่เกิน ความชื้นอากาศ ไม่เกิน Relay 2 และ Relay 3 ไม่ทำงาน                                                     
+          {
+           digitalWrite(Relay2,LOW);                                      
+           digitalWrite(Relay3,LOW);
+          }
+        if (millis() - timer1 >= Relaytime2)
+           {
+            timer1 = millis();
+            state1 = TH_STATE_STOP;
+           }
+        //
+        break;
+        case TH_STATE_STOP://delay 2000
+        Serial.print("HH\t");
+        Serial.println((millis() - timer1)/1000);
+        digitalWrite(Relay2,LOW);
+        digitalWrite(Relay3,LOW);                                    
+           if (millis() - timer1 >= Relaytime3)
+           {
+            timer1 = millis();
+            state1 = TH_STATE_PLAY; 
+           }
+        //
+        break;
+        }
+        switch (state2)
+        { 
+        case SM_STATE_PLAY://delay 3000
+        Serial.print("SM\t");
+        Serial.println((millis() - timer2)/1000);
+           if( sensorValue > SM )                                                             
+           {
+             digitalWrite(Relay1,HIGH);
+           }
+           else if( sensorValue <= SM )                                                      
+           {                                      
+             digitalWrite(Relay1,LOW);
+           }
+        if (millis() - timer2 >= Relaytime5)//transition
+        {
+          timer2 = millis();
+          state2 = SM_STATE_STOP; 
+        }
+        //
+        break;
+        case SM_STATE_STOP://delay 2000
+        Serial.print("SM_GG\t");
+        Serial.println((millis() - timer2)/1000);
+        digitalWrite(Relay1,LOW);
+        if (millis() - timer2 >= Relaytime6)
+        {
+          timer2 = millis();
+          state2 = SM_STATE_PLAY; 
+        }
+        break;
+        }
+    }
+}
